@@ -1,0 +1,478 @@
+『『LVS』』负载均衡
+更新内核来实现FULL-NAT （LVS-4）
+不具备健康检查
+
+4层：LVS[转发]
+7层：Nginx缓存[代理]
+IP负载均衡4种方式
+
+
+LVS 四种模式十种算法
+
+【四种模式】
+NAT	优点：配置简单任何操作系统,不在同一网段也行( 只要支持TCP/IP 80端口)
+	缺点：效率低（所有流量均经过调度器）   去： Client--->---VS(DNAT)---------->-----RS
+									回： Client---<---VS(SNAT)----------<-----RS
+TUN	优点：广域网连接
+	缺点：硬件支持，配置复杂
+	优点：支持VLAN（虚拟局域网），广域网
+			
+		Client(发起请求针对VIP)------->VS（重新封包转换Client请求到针对RIP）----(巨型帧)----> RS（直接回应CIP）---> Client
+DR直接路由模式
+	优点：适配性高
+	缺点：必须同一网段（NO-ARP：在server1和server2必须对外禁用arp，）所有VIP必须相同
+		第二层链路层，DR直接转发
+原理同上
+Client-----> Virtual Server(VS调度器) --(MAC Trans)--> Real Servers（多个RS）-----Direct-----> Client										改变MAC地址（二层数据链路层），所以RS上面必须有VIP，不然无法实现TCP三次握手
+关不是调度器，不然数据会回去调度器
+VS和RS VIP相同，RS（禁用arp使Client无法直接访问）
+
+FULL-NAT
+？？？？？？？？？？？？？？？
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+【十种算法】
+http://ximenfeibing.blog.51cto.com/8809812/1656164
+LVS的调度方法分为两种，一种是静态方法，一种是动态方法：
+静态方法：仅根据算法本身实现调度；实现起点公平，不管服务器当前处理多少请求，分配的数量一致
+动态方法：根据算法及后端RS当前的负载状况实现调度；不管以前分了多少，只看分配的结果是不是公平
+静态调度算法（4种）:
+(1)rr : round robin :轮叫,轮询  
+说明：轮询调度算法的原理是每一次把来自用户的请求轮流分配给内部中的服务器，从1开始，直到N(内部服务器个数)，然后重新开始循环。算法的优点是其简洁性，它无需记录当前所有连接的状态，所以它是一种无状态调度。缺点：是不考虑每台服务器的处理能力。
+(2)wrr: weight round robin :加权轮询(以权重之间的比例实现在各主机之间进行调度)  
+说明：由于每台服务器的配置、安装的业务应用等不同，其处理能力会不一样。所以，我们根据服务器的不同处理能力，给每个服务器分配不同的权值，使其能够接受相应权值数的服务请求。
+(3)sh : source hashing : 源地址hash实现会话绑定sessionaffinity  
+说明：简单的说就是有将同一客户端的请求发给同一个real server,源地址散列调度算法正好与目标地址散列调度算法相反，它根据请求的源IP地址，作为散列键（Hash Key）从静态分配的散列表找出对应的服务器，若该服务器是可用的并且没有超负荷，将请求发送到该服务器，否则返回空。它采用的散列函数与目标地址散列调度算法的相同。它的算法流程与目标地址散列调度算法的基本相似，除了将请求的目标IP地址换成请求的源IP地址。
+(4)dh : destination hashing : 目标地址hash  
+说明：将同样的请求发送给同一个server,一般用于缓存服务器，简单的说，LB集群后面又加了一层，在LB与realserver之间加了一层缓存服务器，当一个客户端请求一个页面时,LB发给cache1,当第二个客户端请求同样的页面时，LB还是发给cache1,这就是我们所说的，将同样的请求发给同一个server,来提高缓存的命中率。目标地址散列调度算法也是针对目标IP地址的负载均衡，它是一种静态映射算法，通过一个散列（Hash）函数将一个目标IP地址映射到一台服务器。目标地址散列调度算法先根据请求的目标IP地址，作为散列键（Hash Key）从静态分配的散列表找出对应的服务器，若该服务器是可用的且未超载，将请求发送到该服务器，否则返回空。
+动态调度算法（6种）:
+(1)lc :leash-connection 最少连接 
+说明：最少连接调度算法是把新的连接请求分配到当前连接数最小的服务器，最小连接调度是一种动态调度短算法，它通过服务器当前所活跃的连接数来估计服务器的负载均衡，调度器需要记录各个服务器已建立连接的数目，当一个请求被调度到某台服务器，其连接数加1，当连接中止或超时，其连接数减一，在系统实现时，我们也引入当服务器的权值为0时，表示该服务器不可用而不被调度。此算法忽略了服务器的性能问题，有的服务器性能好，有的服务器性能差，通过加权重来区分性能，所以有了下面算法wlc。
+简单算法：active*256+inactive (谁的小，挑谁)
+(2)wlc :加权最少连接  
+加权最小连接调度算法是最小连接调度的超集，各个服务器用相应的权值表示其处理性能。服务器的缺省权值为1，系统管理员可以动态地设置服务器的权限，加权最小连接调度在调度新连接时尽可能使服务器的已建立连接数和其权值成比例。由于服务器的性能不同，我们给性能相对好的服务器，加大权重，即会接收到更多的请求。
+简单算法：（active*256+inactive）/weight（谁的小，挑谁）
+(3)sed :最少期望延迟  
+说明：不考虑非活动连接，谁的权重大，我们优先选择权重大的服务器来接收请求，但会出现问题，就是权重比较大的服务器会很忙，但权重相对较小的服务器很闲，甚至会接收不到请求，所以便有了下面的算法nq。
+基于wlc算法，简单算法：（active+1)*256/weight （谁的小选谁）
+(4).nq :never queue 永不排队   
+说明：在上面我们说明了，由于某台服务器的权重较小，比较空闲，甚至接收不到请求，而权重大的服务器会很忙，所此算法是sed改进，就是说不管你的权重多大都会被分配到请求。简单说，无需队列，如果有台real server的连接数为0就直接分配过去，不需要在进行sed运算。
+(5).LBLC :基于局部性的最少连接  
+说明：基于局部性的最少连接算法是针对请求报文的目标IP地址的负载均衡调度，主要用于Cache集群系统，因为Cache集群中客户请求报文的目标IP地址是变化的，这里假设任何后端服务器都可以处理任何请求，算法的设计目标在服务器的负载基本平衡的情况下，将相同的目标IP地址的请求调度到同一个台服务器，来提高服务器的访问局部性和主存Cache命中率，从而调整整个集群系统的处理能力。
+(6).LBLCR :基于局部性的带复制功能的最少连接   
+说明：基于局部性的带复制功能的最少连接调度算法也是针对目标IP地址的负载均衡，该算法根据请求的目标IP地址找出该目标IP地 址对应的服务器组，按“最小连接”原则从服务器组中选出一台服务器，若服务器没有超载，将请求发送到该服务器；若服务器超载，则按“最小连接”原则从这个集群中选出一台服务器，将该服务器加入到服务器组中，将请求发送到该服务器。同时，当该服务器组有一段时间没有被修改，将最忙的服务器从服务器组中删除， 以降低复制的程度。
+
+
+
+
+
+
+
+———————————————————————『『LVS』』—————————————————————————
+
+1、操作
+安装ipvsadm(需要特殊repo)
+ipvsadm：LVS调度器，不具有健康检查功能
+
+[root@server1 ~]# ip addr add 172.25.25.100/24 dev eth0	##增加一个IP，子网掩码默认为32
+[root@server1 ~]# ipvsadm -A -t 172.25.25.100:80 -s rr	##添加一条新的虚拟IP记录
+						append	tcp					schedule 
+[root@server1 ~]# ipvsadm -a -t 172.25.25.100:80 -r 172.25.25.3:80 -g	##在虚拟IP中指定Real Server记录
+						add			--gatewaying   -g      gatewaying (direct routing) (default)
+[root@server1 ~]# ipvsadm -a -t 172.25.25.100:80 -r 172.25.25.4:80 -g	
+
+
+[root@server1 ~]# ipvsadm -L			## 查看状态/调度记录
+IP Virtual Server version 1.2.1 (size=4096) 	##太小会导致丢包
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  172.25.25.100:http rr
+  -> server3.example.com:http     Route   1      0          0         
+  -> server4.example.com:http     Route   1      0          0         
+
+[root@server1 ~]# ipvsadm -Ln			##不解析
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  172.25.25.100:80 rr
+  -> 172.25.25.3:80               Route   1      0          0         
+  -> 172.25.25.4:80               Route   1      0          0         
+s
+
+2、在3，4上均需要增加100的VIP，但是VIP不能对外相应
+1，更改内核屏蔽
+sysctl
+2，使用arptables_jf屏蔽ARP协议
+[root@server3 ~]# yum install arptables_jf
+											arptables -A IN -d <virtual_ip> -j DROP
+													append IN链 destination				-策略
+[root@server3 ~]# arptables -A IN -d 172.25.25.100 -j DROP
+										arptables -A OUT -s <virtual_ip> -j mangle --mangle-ip-s <real_ip>
+[root@server3 ~]# arptables -A OUT -s 172.25.25.100 -j mangle --mangle-ip-s 172.25.25.3
+
+3、关闭3，仍存在调度，说明LVS对后断不存在健康检查
+测试方法：关闭3 httpd	
+curl 172.25.25.100
+一坏一好
+开启三
+
+
+
+
+———————————————————————『『整合Ldirectord弥补LVS的缺陷健康监测』』—————————————————————————
+1.停止
+[root@server1 Heartbeat]# ipvsadm -C
+
+1.安装Ldirector
+[root@server1 Heartbeat]# yum install ldirectord-3.9.5-3.1.x86_64.rpm 
+2.复制配置文件
+[root@server1 Heartbeat]# rpm -qd ldirectord-3.9.5-3.1.x86_64
+/usr/share/doc/ldirectord-3.9.5/COPYING
+/usr/share/doc/ldirectord-3.9.5/ldirectord.cf
+/usr/share/man/man8/ldirectord.8.gz
+[root@server1 Heartbeat]# cp /usr/share/doc/ldirectord-3.9.5/ldirectord.cf /etc/ha.d/
+[root@server1 Heartbeat]# vim /etc/ha.d/ldirectord.cf 
+3.编辑Ldirector来控制LVS
+以-g gate（DR模式）为例子
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Sample for an http virtual service
+virtual=172.25.25.100:80  			##VIP
+        real=172.25.25.3:80 gate 	##RIP1
+        real=172.25.25.4:80 gate	##RIP2
+        fallback=127.0.0.1:80 gate	##故障转移到本机
+        service=http
+        scheduler=rr				##轮询
+        #persistent=600
+        #netmask=255.255.255.255
+        protocol=tcp		
+        checktype=negotiate		
+        checkport=80	
+        request="index.html"
+#       receive="Test Page"			##  这个文件一定要在real的web目录中存在，并且能够正常访问的，ipvs通过它来判断客户端是否存活
+#       virtualhost=www.x.y.z
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+4.启动
+[root@server1 Heartbeat]# /etc/init.d/ldirectord start
+Starting ldirectord... success
+
+5.测试
+##停止server3的httpd
+[root@server3 ~]# /etc/init.d/httpd stop
+停止 httpd：                                               [确定]
+
+【失败状态】：
+[root@foundation25 python2.7]# curl 172.25.25.100
+server4.example.com
+[root@foundation25 python2.7]# curl 172.25.25.100
+curl: (7) Failed connect to 172.25.25.100:80; 拒绝连接
+[root@foundation25 python2.7]# curl 172.25.25.100
+server4.example.com
+[root@foundation25 python2.7]# curl 172.25.25.100
+curl: (7) Failed connect to 172.25.25.100:80; 拒绝连接
+
+
+【成功状态】：
+[root@foundation25 python2.7]# curl 172.25.25.100
+server4.example.com
+[root@foundation25 python2.7]# curl 172.25.25.100
+server4.example.com
+[root@foundation25 python2.7]# curl 172.25.25.100
+server4.example.com
+
+
+———————————————————————『『LVS+ldirectord整合Heartbeat实现HA+LB』』—————————————————————————
+
+【原理】
+Heartbeat实现启动HA集群(server1,server2)的ldirector和httpd（仅为故障提供页面，不提供基础服务）（那么server3，server4的HA怎么办？）
+LVS 实现对后(server3,server4)的调度
+ldirectord实现对后段的健康监测，故障切换
+为什么server3,server4会听LVS调度
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+1.停止server1，server2上的heartbeat和相关资源
+##删除VIP
+[root@server1 Heartbeat]# ip addr del 172.25.25.100/24 dev eth0
+##停止heartbeat，方便编辑文件
+[root@server1 Heartbeat]#  /etc/init.d/heartbeat stop
+Stopping High-Availability services: Done.
+
+[root@server1 Heartbeat]#  /etc/init.d/ldirectord stop
+Stopping ldirectord... success
+
+[root@server1 Heartbeat]#  /etc/init.d/httpd stop
+停止 httpd：                                               [成功]
+
+
+##后段server3，server4的IP,httpd需要手动启动，或者添加开机脚本
+
+
+2.编辑并复制haresources,ldirectord.cf两个文件到2
+server1.example.com     IPaddr::172.25.25.100/24/eth0   ldirectord      httpd
+
+[root@server1 Heartbeat]# scp /etc/ha.d/haresources root@172.25.25.2:/etc/ha.d/
+root@172.25.25.2's password: 
+haresources                                                       100% 5972     5.8KB/s   00:00 
+[root@server1 Heartbeat]# scp /etc/ha.d/..cf root@172.25.25.2:/etc/ha.d/
+root@172.25.25.2's password: 
+ldirectord.cf                                                     100% 8277     8.1KB/s   00:00 
+
+
+3.分别开启heartbeat
+
+[root@server1 Heartbeat]# /etc/init.d/heartbeat start
+
+4.测试
+查看日志
+[root@server1 Heartbeat]# tail /var/log/messages
+看1是否有vip资源
+[root@server1 Heartbeat]# ip addr |grep eth0
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+    inet 172.25.25.1/24 brd 172.25.25.255 scope global eth0
+    inet 172.25.25.100/24 brd 172.25.25.255 scope global secondary eth0
+测试停掉1的heartbeat
+观察：server2是否获得VIP
+
+[root@server2 Heartbeat]# ip addr | grep eth0
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+    inet 172.25.25.2/24 brd 172.25.25.255 scope global eth0
+    inet 172.25.25.100/24 brd 172.25.25.255 scope global secondary eth0
+【成功！】
+
+调度器正常？
+
+[root@server2 Heartbeat]# ipvsadm -Ln
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  172.25.25.100:80 rr
+  -> 172.25.25.3:80               Route   1      0          38        
+  -> 172.25.25.4:80               Route   1      0          37 
+
+【成功！】
+
+
+关闭server3后是否切换至server4？
+[root@server3 ~]# /etc/init.d/httpd stop
+停止 httpd：                                               [确定]
+
+[root@foundation25 python2.7]# for in in {1..10}; do  curl 172.25.25.100; done
+server4.example.com
+server4.example.com
+server4.example.com
+server4.example.com
+server4.example.com
+server4.example.com
+server4.example.com
+server4.example.com
+server4.example.com
+server4.example.com
+【成功！】
+
+
+关闭server3和server4后是否切换至2的故障页面？
+
+[root@foundation25 python2.7]# for in in {1..10}; do  curl 172.25.25.100; done
+server2.example.com 故障页面
+server2.example.com 故障页面
+server2.example.com 故障页面
+server2.example.com 故障页面
+server2.example.com 故障页面
+server2.example.com 故障页面
+server2.example.com 故障页面
+server2.example.com 故障页面
+server2.example.com 故障页面
+server2.example.com 故障页面
+
+
+成功！
+
+server1恢复后是否回切？
+[root@server1 Heartbeat]# /etc/init.d/heartbeat start
+
+[root@foundation25 python2.7]# for in in {1..10}; do  curl 172.25.25.100; done
+server1.example.com 故障页面
+server1.example.com 故障页面
+server1.example.com 故障页面
+server1.example.com 故障页面
+server1.example.com 故障页面
+server1.example.com 故障页面
+server1.example.com 故障页面
+server1.example.com 故障页面
+server1.example.com 故障页面
+server1.example.com 故障页面
+
+【成功！】
+
+———————————————————————『『使用Keepalived实现Heartbeat+Ldirectord的功能』』—————————————————————————
+原理：
+要关闭heartbeat
+高可用（基于VRRP的自动启动资源）+ 健康监测	
+配合LVS实现负载均衡
+
+VRRP（Virtual Router Redundancy Protocol）虚拟路由冗余协议
+工作原理：在VRRP中有两组重要的概念。VRRP路由器和虚拟路由器，主控路由器和备份路由器。VRRP路由器是指运行VRRP的路由器，是物理实体，虚拟路由器是指VRRP协议创建的，是逻辑概念。一组VRRP路由器协同工作，共同构成一台虚拟路由器。 Vrrp中存在着一种选举机制，用以选出提供服务的路由即主控路由，其他的则成了备份路由。当主控路由失效后，备份路由中会重新选举出一个主控路由，来继续工作，来保障不间断服务。
+
+其中主控的选举是依靠优先级的设定（0-255）可设定范围1-254.
+
+VRRP协议使用多播数据来传输VRRP数据，VRRP数据使用特殊的虚拟源MAC地址发送数据而不是自身网卡的MAC地址，VRRP运行时只有MASTER路由器定时发送VRRP通告信息，表示MASTER工作正常以及虚拟路由器IP(组)，BACKUP只接收VRRP数据，不发送数据，如果一定时间内没有接收到MASTER的通告信息，各BACKUP将宣告自己成为MASTER，发送通告信息，重新进行MASTER选举状态。
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+1.编译
+lftp 172.25.254.251:/pub/docs/keepalived> mget keepalived-1.2.24.tar.gz libnfnetlink-devel-1.0.0-1.el6.x86_64.rpm
+
+yum install openssl-devel
+
+（为什么编译不过去？）
+Keepalived configuration
+------------------------
+Keepalived version       : 1.2.24
+Compiler                 : gcc
+Preprocessor flags       : 
+Compiler flags           : -Wall -Wunused -Wstrict-prototypes
+Linker flags             : 
+Extra Lib                : -ldl -lssl -lcrypto 
+Use IPVS Framework       : Yes
+
+
+2.看init.d脚本知道启动时需要那些文件
+[root@server1 keepalived]# vim etc/rc.d/init.d/keepalived 
+---------------------------------------------------------------------------------------------------------------------
+# Source function library
+. /etc/rc.d/init.d/functions
+
+# Source configuration file (we set KEEPALIVED_OPTIONS there)
+. /etc/sysconfig/keepalived
+---------------------------------------------------------------------------------------------------------------------
+
+
+3.启动脚本在
+ln -s /usr/local/keepalived/etc/rc.d/init.d/keepalived /etc/init.d/
+【系统全局配置文件在】
+ln -s /usr/local/keepalived/etc/sysconfig/keepalived /etc/sysconfig
+【Keepalived配置文件在】
+ln -s /usr/local/keepalived/etc/keepalived/keepalived.conf /etc/
+【启动脚本在】
+ln -s /usr/local/keepalived/sbin/keepalived /sbin
+	chmod +x /etc/init.d/keepalived
+
+4.编辑配置文件
+vim /etc/keepalived.conf
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+更改server2上的
+! Configuration File for keepalived
+
+global_defs {
+   notification_email {
+	 root@localhost					#通知邮箱
+   }
+   notification_email_from keepalived1@server1.example.com
+									##发件人名字可以随意更改,You Know And You  Have Tried
+   smtp_server 127.0.0.1			##SMTP服务器
+									##yum install mail-x
+   smtp_connect_timeout 30
+   router_id LVS_DEVEL
+   vrrp_skip_check_adv_addr
+   vrrp_strict
+   vrrp_garp_interval 0
+   vrrp_gna_interval 0
+}
+
+vrrp_instance VI_1 {
+    state MASTER
+    interface eth0
+    virtual_router_id 190
+    priority 100
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass 1111
+    }
+    virtual_ipaddress {
+        172.25.25.100
+	172.25.25.200							##双VIP，双服务（http+ftp）
+    }
+}
+
+virtual_server 172.25.25.100 80 {		##资源定义VIP100的80端口
+    delay_loop 6
+    lb_algo rr
+    lb_kind DR
+    #persistence_timeout 50				##持续连接(同一IP的连接30秒内被分配到后段的同一台RS）
+    protocol TCP
+
+    real_server 172.25.25.3 80 {
+        weight 1
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+    real_server 172.25.25.4 80 {
+        weight 1
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+   }
+}
+
+virtual_server 172.25.25.200 21 {		##资源定义VIP200的21端口
+    delay_loop 6
+    lb_algo rr
+    lb_kind DR
+    #persistence_timeout 50				##持续连接(同一IP的连接30秒内被分配到后段的同一台RS）
+    protocol TCP
+
+    real_server 172.25.25.3 80 {
+        weight 1						##RR不考虑权重
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+    real_server 172.25.25.4 21 {
+        weight 1
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+   }
+}
+~
+~
+~
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+后面不能有空行
+在3，4上增加新的VIP用于FTP服务
+ip addr add 172.25.25.200/24 dev eth0 	
+增加VIP后必须配置arptables通过DROP所有VIP的访问，来防止直接访问RS
+
+
+———————————————————————『『Tips』』—————————————————————————
+
+1.arptables
+通过Mangle修改封包内容以完成TCP/IP的三次握手
+yum install arptables_jf
+arptables -A IN -d 172.25.25.200 -j DROP		##扔掉访问VIP的arp包
+arptables -A OUT -s 172.25.25.200 -j mangle --mangle-ip-s 172.25.25.3
+					#将来自于调度器的(访问目标是172.25.25.3)的数据包在【出去时】改变为200以便继续完成握手
+					##见下面示例
+LVS---------------->   RS（server3）------------------->
+对于RS			目标是X.X.X.3的内网访问-----Mangle------>目标是X.X.X.200的访问
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2.Keepalived作用对象：调度器
+Keepalived 不仅可以实现对调度器的高可用（避免单点调度故障），还可以对后端RS进行高可用
+【调度器的高可用和后端健康检查】
+问题：对3，4的HA，Heartbeat为什么要装在1，2上
+（3，4为什么不装？）：因为3，4在实际中是几千台Web服务器，
+						之所以很多，是为了缓解压力，并不是HA。
+						之所以内容一样，是因为使用共享存储。并不是HA
+

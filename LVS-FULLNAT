@@ -1,0 +1,94 @@
+1.需要的软件
+asciidoc-8.4.5-4.1.el6.noarch.rpm   newt-devel-0.52.11-3.el6.x86_64.rpm
+kernel-2.6.32-220.23.1.el6.src.rpm  slang-devel-2.2.1-1.el6.x86_64.rpm
+Lvs-fullnat-synproxy.tar.gz 
+			##SYNPROXY:廉价的抗 DoS 攻击方案
+[root@server4 SPECS]# yum install gcc redhat-rpm-config patchutils xmlto elfutils-libelf-devel zlib-devel binutils-devel python-devel hmaccalc perl-devel  perl-ExtUtils-Embed 
+
+[root@server4 lvs]# yum install asciidoc-8.4.5-4.1.el6.noarch.rpm newt-devel-0.52.11-3.el6.x86_64.rpm  slang-devel-2.2.1-1.el6.x86_64.rpm
+
+2.生成SPEC
+[root@server4 SPECS]# rpm -ivh kernel-2.6.32-220.23.1.el6.src.rpm 
+[root@server4 lvs]# cd ~/rpmbuild/SPECS/
+[root@server4 ~]# cd rpmbuild/SPECS/
+[root@server4 SPECS]# ls
+kernel.spec
+
+3.build
+[root@server4 ~]# cd rpmbuild/SPECS/
+[root@server4 SPECS]#  rpmbuild -bp kernel.spec
+gpg: keyring `./secring.gpg' created
+gpg: keyring `./pubring.gpg' created
+需要rng-tools生成随机数
+
+4.打补丁
+
+[root@server4 ~]#cp ~/lvs/lvs-fullnat-synproxy/lvs-2.6.32-220.23.1.el6.patch ~/rpmbuild/BUILD/kernel-2.6.32-220.23.1.el6/linux-2.6.32-220.23.1.el6.x86_64/
+[root@server4 kernel-2.6.32-220.23.1.el6]# cd /root/rpmbuild/BUILD/kernel-2.6.32-220.23.1.el6/linux-2.6.32-220.23.1.el6.x86_64/
+[root@server4 kernel-2.6.32-220.23.1.el6]# ls lvs-2.6.32-220.23.1.el6.patch 
+lvs-2.6.32-220.23.1.el6.patch	##确认这个文件
+ patch -p1<lvs-2.6.32-220.23.1.el6.patch 
+
+5.编译安装
+[root@server4 linux-2.6.32-220.23.1.el6.x86_64]# vim Makefile
+----------------------------------------------------------------------------------------------------------
+VERSION = 2
+PATCHLEVEL = 6
+SUBLEVEL = 32
+EXTRAVERSION =X	##更改额外版本号，现实2.6.32.X
+NAME = Man-Eating Seals of Antiquity
+RHEL_MAJOR = 6
+RHEL_MINOR = 2
+RHEL_RELEASE = 219
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+[root@server4 linux-2.6.32-220.23.1.el6.x86_64]# make -j4
+[root@server4 linux-2.6.32-220.23.1.el6.x86_64]# make modules_install && make install
+
+[root@server4 ~]# vim /etc/grub.conf 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+default=0		## 改为0，表示默认系统为第一个,
+timeout=5
+splashimage=(hd0,0)/grub/splash.xpm.gz
+hiddenmenu
+title Red Hat Enterprise Linux Server (2.6.32)
+        root (hd0,0)
+        kernel /vmlinuz-2.6.32 ro root=/dev/mapper/vg_server-lv_root rd_LVM_LV=vg_server/lv_swap rd_NO_LUKS rd_LVM_LV=vg_server/lv_root rd_NO_MD crashkernel=auto LANG=zh_CN.UTF-8  KEYBOARDTYPE=pc KEYTABLE=us rd_NO_DM rhgb quiet
+        initrd /initramfs-2.6.32.img
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+6.重启
+选择第一个内核
+
+7.编译安装安装keepalived
+[root@server4 ~]# cd lvs/lvs-fullnat-synproxy/
+[root@server4 lvs-fullnat-synproxy]# cd tools/
+[root@server4 tools]# ls
+ipvsadm  keepalived  quagga  rpm
+[root@server4 keepalived]# cd keepalived/
+[root@server4 keepalived]# ls
+[root@server4 keepalived]# ./configure --with-kernel-dir="/lib/modules/`uname -r`/build"
+
+Keepalived configuration
+------------------------
+Keepalived version       : 1.2.2
+Compiler                 : gcc
+Compiler flags           : -g -O2
+Extra Lib                : -lpopt -lssl -lcrypto 
+Use IPVS Framework       : Yes				##重要
+IPVS sync daemon support : Yes
+IPVS use libnl           : No
+Use VRRP Framework       : Yes				##重要
+Use Debug flags          : No
+
+8.编译安装ipvsadm
+[root@server4 keepalived]# cd ../ipvsadm/
+[root@server4 ipvsadm]# make && make install
+
+
+9.
+[root@server4 ipvsadm]# ipvsadm -L
+IP Virtual Server version 1.2.1 (size=4194304)		##size changed
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+
+

@@ -1,0 +1,263 @@
+————————————————————一、『『Zabbix安装』』————————————————————
+
+
+——————————监控端——————————
+1.需要的软件
+官方下载地址：
+http://www.zabbix.com/download
+国内镜像：
+https://mirrors.aliyun.com/zabbix/zabbix/
+	
+监控端基础组件：
+zabbix-2.4.5-1.el6.x86_64.rpm
+zabbix-server-2.4.5-1.el6.x86_64.rpm
+zabbix-server-mysql-2.4.5-1.el6.x86_64.rpm
+zabbix-web-2.4.5-1.el6.noarch.rpm
+zabbix-web-mysql-2.4.5-1.el6.noarch.rpm
+需要下载的依赖：
+	fping-2.4b2-16.el6.x86_64.rpm
+	php-bcmath-5.3.3-26.el6.x86_64.rpm	##取决于php版本 php-v
+	php-mbstring-5.3.3-26.el6.x86_64.rpm
+	iksemel-1.4-2.el6.x86_64.rpm
+
+
+
+2.在数据库中为zabbix创建表
+[root@server1 zabbix]# /etc/init.d/mysqld start
+正在启动 mysqld：                                          [确定]
+mysql> create database zabbix character set utf8 collate utf8_bin;
+Query OK, 1 row affected (0.00 sec)
+
+mysql> grant all privileges on zabbix.* to zabbix@localhost identified by 'zabbixpwd';
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> quit;
+Bye
+
+
+3.从ZABBIX模板导入数据库(yum安装时就被自动释放到/usr/share/doc)
+[root@server1 create]# cd /usr/share/doc/zabbix-server-mysql-2.4.5/create
+[root@server1 create]# mysql zabbix <schema.sql 
+[root@server1 create]# mysql zabbix <images.sql 
+[root@server1 create]# mysql zabbix <data.sql 
+
+
+4.修改ZABBIX配置文件
+-------------------------------------------------------------------------------------------------
+DBName=zabbix
+
+### Option: DBSchema
+#       Schema name. Used for IBM DB2 and PostgreSQL.
+#
+# Mandatory: no
+# Default:
+# DBSchema=
+
+### Option: DBUser
+#       Database user. Ignored for SQLite.
+#
+# Mandatory: no
+# Default:
+# DBUser=
+
+DBUser=zabbix
+
+### Option: DBPassword
+#       Database password. Ignored for SQLite.
+#       Comment this line if no password is used.
+#
+# Mandatory: no
+# Default:
+DBPassword=zabbixpwd
+
+### Option: DBSocket
+#       Path to MySQL socket.
+#
+# Mandatory: no
+# Default:
+# DBSocket=/tmp/mysql.sock
+
+-------------------------------------------------------------------------------------------------
+
+5.ZABBIX自动创建了Apache配置文件
+[root@server1 www]# vim /etc/httpd/conf.d/zabbix.conf 
+
+
+
+6.启动
+[root@server1 www]# /etc/init.d/httpd start
+正在启动 httpd：                                           [确定]
+[root@server1 www]# /etc/init.d/zabbix-server start
+Starting Zabbix server:                                    [确定]
+[root@server1 zabbix]# /etc/init.d/zabbix-agent start
+Starting Zabbix agent:                                     [确定]
+
+
+7.访问并进行配置
+http://172.25.25.1/zabbix/setup.php
+初始账户：Admin
+初始密码：zabbix
+
+
+
+
+
+——————————被监控端——————————
+1.需要的软件
+zabbix-2.4.5-1.el6.x86_64.rpm  
+zabbix-agent-2.4.5-1.el6.x86_64.rpm 
+
+2.启动
+[root@server2 ~]# /etc/init.d/zabbix-agent start
+Starting Zabbix agent:                                     [确定]
+[root@server2 ~]# netstat -ntpl |grep 10050
+tcp        0      0 0.0.0.0:10050               0.0.0.0:*                   LISTEN      1867/zabbix_agentd  
+tcp        0      0 :::10050                    :::*
+
+
+————————————————————二、『『Zabbix-Discovery和AutoRegistration』』————————————————————
+
+----------------------------------------------------------------------------------------------------------------------------------
+参考文档：
+http://blog.csdn.net/zk673820543/article/details/50666947
+http://www.ttlsa.com/zabbix/zabbix-actions/
+http://www.bubuko.com/infodetail-1533720.html
+----------------------------------------------------------------------------------------------------------------------------------
+一、创建Discovery规则
+图
+
+二、添加Discovery的Action
+2.1、为discovery（发现）创建action（动作）
+
+
+
+
+
+
+
+————————————————————三、『『Zabbix监控Apache服务』』————————————————————
+
+Zabbix自带http监控模板
+
+————————————————————四、『『Zabbix监控Nginx服务』』————————————————————
+4.1编译安装Nginx
+	
+[root@s[root@server2 nginx]# ./configure --prefix=/usr/local/nginx --with-http_stub_status_moduleerver2 nginx]# ./configure --prefix=/usr/local/nginx --with-http_stub_status_module
+[root@server2 nginx]# make && make install
+[root@server2 nginx]# vim /usr/local/nginx/conf/nginx.conf
+
+
+4.2编辑Nginx配置文件
+
+[root@server2 nginx]# vim /usr/local/nginx/conf/nginx.conf
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+
+    #log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+    #                  '$status $body_bytes_sent "$http_referer" '
+    #                  '"$http_user_agent" "$http_x_forwarded_for"';
+
+    #access_log  logs/access.log  main;
+
+    sendfile        on;
+    #tcp_nopush     on;
+
+    #keepalive_timeout  0;
+    keepalive_timeout  65;
+
+    #gzip  on;
+
+    server {
+        listen       80;
+        server_name  localhost;
+
+        #charset koi8-r;
+
+        #access_log  logs/host.access.log  main;
+
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+
+        #error_page  404              /404.html;
+
+        # redirect server error pages to the static page /50x.html
+        #
+        error_page   500 502 503 504  /50x.html;
+        location = /50x.html {
+            root   html;
+        }
+        location /status{											##在http内添加这一行
+                stub_status on;
+                access_log off;
+        }
+
+
+    }
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+3.校验配置文件并启动
+[root@server2 nginx]# /usr/local/nginx/sbin/nginx -t
+nginx: the configuration file /usr/local/nginx/conf/nginx.conf syntax is ok
+nginx: configuration file /usr/local/nginx/conf/nginx.conf test is successful
+[root@server2 nginx]# /usr/local/nginx/sbin/nginx 
+
+
+
+
+————————————————————五、『『Zabbix监控MySQL服务』』————————————————————
+
+51使用自带模板监控
+
+
+
+5.2使用Percona Monitoring Plugins监控MySQL
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Percona Monitoring Plugins 是一个高质量的组件，为 MySQL 数据库添加企业级的监控和图表功能，另外该插件可以和 Nagios 或者是 Cacti 等监控系统的集成。
+官方文档：
+https://www.percona.com/software/database-tools/percona-monitoring-plugins
+中文手册：
+https://wenku.baidu.com/view/7aa2cf5414791711cc7917f7.html
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+————————————————————六、『『Zabbix-Active主动模式』』————————————————————
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+参考文档：
+http://www.linuxidc.com/Linux/2015-08/121799.htm
+agent不再监听10050端口，主动连接Zabbix-Server上的10051端口
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+6.1修改文件
+[root@server2 ~]# vim /etc/zabbix/zabbix_agentd.conf 
+------------------------------------------------------------
+ServerActive 172.25.25.1
+StartAgents=0    ##不再启动Agent端口
+------------------------------------------------------------
+
+6.2重启服务
+[root@server2 ~]# /etc/init.d/zabbix-agent restart
+
+
+
+
+————————————————————七、『『Zabbix-Proxy』』————————————————————
+
+
+
+
+作业：
+nmon
+cacti导出脚本
+zabbix get?
+
+
+
+————————————————————七、『『Zabbix-API』』————————————————————
+https://www.zabbix.com/documentation/2.4/manual/api/reference/host/get
