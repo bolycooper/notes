@@ -85,7 +85,7 @@ Use Debug flags          : No
 [root@server4 ipvsadm]# make && make install
 
 
-9.
+9.列出服务表中的所有服务
 [root@server4 ipvsadm]# ipvsadm -L
 IP Virtual Server version 1.2.1 (size=4194304)		##size changed
 Prot LocalAddress:Port Scheduler Flags
