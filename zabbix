@@ -252,10 +252,9 @@ StartAgents=0    ##不再启动Agent端口
 
 
 
-作业：
 nmon
 cacti导出脚本
-zabbix get?
+zabbix get
 
 
 
