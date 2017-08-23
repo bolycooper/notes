@@ -1,0 +1,321 @@
+------------------------------一、『『MySQL主从复制』』------------------------------
+Master IP:10.104.81.M
+Slave IP:10.135.97.S
+
+[MySQL主从完全步骤]http://www.cnblogs.com/gdsblog/p/6667894.html
+1创建复制帐号
+-----------------------------------------------------------------------------
+MariaDB [(none)]> DROP USER'slave'@'10.135.97.S';
+Query OK, 0 rows affected (0.00 sec)
+
+MariaDB [(none)]> CREATE USER 'slave'@'10.135.97.S' IDENTIFIED BY 'XXXXXXXX';
+Query OK, 0 rows affected (0.00 sec)
+
+
+MariaDB [(none)]> GRANT REPLICATION SLAVE,RELOAD,SUPER ON *.* TO 'slave'@'10.135.97.S';
+Query OK, 0 rows affected (0.00 sec)
+
+MariaDB [(none)]> FLUSH PRIVILEGES;
+# 用GRANT、REVOKE或SET PASSWORD对授权表施行的修改会立即被服务器刷新，手动改表需要FLUSH PRIVILEGES
+
+#查看所有用户
+MariaDB [(none)]> SELECT DISTINCT CONCAT('User: ''',user,'''@''',host,''';') AS query FROM mysql.user; 
++------------------------------------+
+| query                              |
++------------------------------------+
+| User: 'monty'@'%';                 |
+| User: 'monty'@'*';                 |
+| User: 'monty'@'10.135.97.S';      |
+| User: 'slave'@'10.135.97.S';      |
+| User: 'root'@'127.0.0.1';          |
+| User: 'root'@'::1';                |
+| User: 'cacti'@'localhost';         |
+| User: 'monty'@'localhost';         |
+| User: 'root'@'localhost';          |
+| User: 'wordpressuser'@'localhost'; |
+| User: 'zabbix'@'localhost';        |
++------------------------------------+
+
+MariaDB [(none)]> SHOW GRANTS FOR 'slave'@'10.135.97.S';
++-------------------------------------------------------------------------+
+| Grants for slave@10.135.97.S                                           |
++-------------------------------------------------------------------------+
+| GRANT RELOAD, SUPER, REPLICATION SLAVE ON *.* TO 'slave'@'10.135.97.S' |
++-------------------------------------------------------------------------+
+
+必须在从机上确认用户可以连上去
+[root@VM_97_47_centos ~]# mysql -h10.104.81.M -u slave -p 
+Enter password: 
+
+
+
+-----------------------------------------------------------------------------
+
+2.同步之前的准备（新Master跳过）
+
+配置主从前需要两边数据相同
+
+
+【非常危险！】删除从机上所有库
+[slave]
+mysql -u root -p -e "show databases" | grep -v Database | grep -v mysql| grep -v information_schema| gawk '{print "drop database " $1 ";select sleep(0.1);"}' | mysql -u root -p
+
+
+-----------------------------------------------------------------------------
+[备份同步]
+[master]
+将Master中的数据拷贝到slave服务器中，使得Master和slave中的数据同步
+并且确保在全部设置操作结束前，禁止在Master和slave服务器中进行写操作，使得两数据库中的数据一定要相同！
+
+[root@VM_81_90_centos ~]# mysqldump -h localhost -u root -p  --all-databases > all.sql
+Enter password: 
+
+【警告！】实验环境才可以停止数据库
+[root@VM_81_90_centos ~]# systemctl stop mariadb
+
+[root@VM_81_90_centos ~]# scp -P PORT all.sql root@10.135.97.S:
+all.sql                                                                          100%   13MB  13.0MB/s   00:00  
+
+[slave]
+[root@VM_97_47_centos ~]# mysql  -p < all.sql
+Enter password: 
+
+3.配置文件设置
+---------------------------
+[Master]
+log-bin=mysql-bin
+server-id   = 1
+
+
+[Slave]
+#log-bin=mysql-bin
+slave没有必要开启二进制日志，但是在一些情况下，必须设置，例如，如果slave为其它slave的master，必须设置bin_log。在这里，我们开启了二进制日志，而且显示的命名(默认名称为hostname，但是，如果hostname改变则会出现问题)。
+
+server-id   = 2
+
+relay-log = mysql-relay
+可以分别使用--relay-log选项覆盖默认中继日志文件名 
+
+---------------------------
+[root@VM_97_47_centos ~]# systemctl restart mariadb
+
+
+4.主初始化
+[master]
+------------------------------------------------------
+【危险！】不要对正在运行的主从实例对使用
+
+MariaDB [(none)]> RESET MASTER ;
+Query OK, 0 rows affected (0.04 sec)
+
+
+MariaDB [(none)]> SHOW MASTER STATUS;
++------------------+----------+--------------+------------------+
+| File             | Position | Binlog_Do_DB | Binlog_Ignore_DB |
++------------------+----------+--------------+------------------+
+| mysql-bin.000001 |    18550 |              |                  |
++------------------+----------+--------------+------------------+
+
+ 注：执行完此步骤后不要再操作主服务器MYSQL，防止主服务器状态值变化
+ 
+#锁表防止主服务器状态值变化
+MariaDB [test]> FLUSH TABLES WITH READ LOCK;
+Query OK, 0 rows affected (0.00 sec)
+
+------------------------------------------------------
+
+5.从机开始同步
+
+[slave]
+------------------------------------------------------
+MariaDB [(none)]> RESET SLAVE;
+Query OK, 0 rows affected (0.00 sec)
+
+CHANGE MASTER TO 
+MASTER_HOST = '10.104.81.M',
+MASTER_USER = 'slave',
+MASTER_PASSWORD = 'XXXXXXXX',
+MASTER_PORT = 3306,
+MASTER_LOG_FILE = 'mysql-bin.000001',
+MASTER_LOG_POS = 18550;  
+
+MariaDB [(none)]> START SLAVE;
+Query OK, 0 rows affected (0.00 sec)
+
+MariaDB [(none)]> SHOW SLAVE STATUS\G;
+*************************** 1. row ***************************
+               Slave_IO_State: Connecting to master
+                  Master_Host: 10.104.81.M
+                  Master_User: slave
+                  Master_Port: 3306
+                Connect_Retry: 60
+              Master_Log_File: mysql-bin.000001
+          Read_Master_Log_Pos: 18550
+               Relay_Log_File: mysql-relay.000001
+                Relay_Log_Pos: 4
+        Relay_Master_Log_File: mysql-bin.000001
+             Slave_IO_Running: Connecting
+            Slave_SQL_Running: Yes
+              Replicate_Do_DB: 
+          Replicate_Ignore_DB: 
+           Replicate_Do_Table: 
+       Replicate_Ignore_Table: 
+      Replicate_Wild_Do_Table: 
+  Replicate_Wild_Ignore_Table: 
+                   Last_Errno: 0
+                   Last_Error: 
+                 Skip_Counter: 0
+          Exec_Master_Log_Pos: 18550
+              Relay_Log_Space: 245
+              Until_Condition: None
+               Until_Log_File: 
+                Until_Log_Pos: 0
+           Master_SSL_Allowed: No
+           Master_SSL_CA_File: 
+           Master_SSL_CA_Path: 
+              Master_SSL_Cert: 
+            Master_SSL_Cipher: 
+               Master_SSL_Key: 
+        Seconds_Behind_Master: NULL
+Master_SSL_Verify_Server_Cert: No
+                Last_IO_Errno: 1045
+                Last_IO_Error: error connecting to master 'slave@10.104.81.M:3306' - retry-time: 60  retries: 86400  message: Access denied for user 'slave'@'10.135.97.S' (using password: YES)
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+  Replicate_Ignore_Server_Ids: 
+             Master_Server_Id: 0
+1 row in set (0.00 sec)
+
+6.同步不成功
+
+密码写错了
+MariaDB [(none)]> STOP SLAVE;
+Query OK, 0 rows affected (0.00 sec)
+
+CHANGE MASTER TO 
+MASTER_HOST = '10.104.81.M',
+MASTER_USER = 'slave',
+MASTER_PASSWORD = 'XXXXXXXX',
+MASTER_PORT = 3306,
+MASTER_LOG_FILE = 'mysql-bin.000001',
+MASTER_LOG_POS = 18550;  
+
+MariaDB [(none)]> START SLAVE;
+Query OK, 0 rows affected (0.00 sec)
+
+
+MariaDB [(none)]> SHOW SLAVE STATUS\G;
+*************************** 1. row ***************************
+               Slave_IO_State: Waiting for master to send event
+                  Master_Host: 10.104.81.M
+                  Master_User: slave
+                  Master_Port: 3306
+                Connect_Retry: 60
+              Master_Log_File: mysql-bin.000001
+          Read_Master_Log_Pos: 18550
+               Relay_Log_File: mysql-relay.000002
+                Relay_Log_Pos: 529
+        Relay_Master_Log_File: mysql-bin.000001
+             Slave_IO_Running: Yes
+            Slave_SQL_Running: Yes
+              Replicate_Do_DB: 
+          Replicate_Ignore_DB: 
+           Replicate_Do_Table: 
+       Replicate_Ignore_Table: 
+      Replicate_Wild_Do_Table: 
+  Replicate_Wild_Ignore_Table: 
+                   Last_Errno: 0
+                   Last_Error: 
+                 Skip_Counter: 0
+          Exec_Master_Log_Pos: 18550
+              Relay_Log_Space: 819
+              Until_Condition: None
+               Until_Log_File: 
+                Until_Log_Pos: 0
+           Master_SSL_Allowed: No
+           Master_SSL_CA_File: 
+           Master_SSL_CA_Path: 
+              Master_SSL_Cert: 
+            Master_SSL_Cipher: 
+               Master_SSL_Key: 
+        Seconds_Behind_Master: 0
+Master_SSL_Verify_Server_Cert: No
+                Last_IO_Errno: 0
+                Last_IO_Error: 
+               Last_SQL_Errno: 0
+               Last_SQL_Error: 
+  Replicate_Ignore_Server_Ids: 
+             Master_Server_Id: 1
+1 row in set (0.00 sec)
+
+7.解锁表和查看状态
+[master]
+MariaDB [(none)]> SHOW PROCESSLIST;
+
++-----+-------+--------------------+-------+-------------+------+-----------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+----------+
+| Id  | User  | Host               | db    | Command     | Time | State                                                                 | Info                                                                                                 | Progress |
++-----+-------+--------------------+-------+-------------+------+-----------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+----------+
+|  71 | root  | localhost          | NULL  | Query       |    0 | NULL                                                                  | SHOW PROCESSLIST                                                                                     |    0.000 |
+| 211 | cacti | localhost          | cacti | Query       |  358 | Waiting for global read lock                                          | REPLACE INTO settings (name, value) VALUES ("stats_poller",'Time:115.5217 Method:spine Processes:1 T |    0.000 |
+| 212 | cacti | localhost          | cacti | Query       |  298 | Waiting for global read lock                                          | REPLACE INTO settings (name, value) VALUES ("stats_poller",'Time:174.6329 Method:spine Processes:1 T |    0.000 |
+| 213 | cacti | localhost          | cacti | Query       |  238 | Waiting for global read lock                                          | REPLACE INTO settings (name, value) VALUES ("stats_poller",'Time:234.7020 Method:spine Processes:1 T |    0.000 |
+| 214 | cacti | localhost          | cacti | Query       |  177 | Waiting for global read lock                                          | REPLACE INTO settings (name, value) VALUES ("stats_poller",'Time:295.5462 Method:spine Processes:1 T |    0.000 |
+| 251 | cacti | localhost          | cacti | Query       |  237 | Waiting for global read lock                                          | REPLACE INTO settings  (name, value)  VALUES ('poller_lastrun_1', '1503480361')                      |    0.000 |
+| 253 | cacti | localhost          | cacti | Query       |  177 | Waiting for global read lock                                          | REPLACE INTO settings  (name, value)  VALUES ('poller_lastrun_1', '1503480421')                      |    0.000 |
+| 255 | cacti | localhost          | cacti | Query       |  117 | Waiting for global read lock                                          | REPLACE INTO settings  (name, value)  VALUES ('poller_lastrun_1', '1503480481')                      |    0.000 |
+| 256 | slave | 10.135.97.S:34550 | NULL  | Binlog Dump |  101 | Master has sent all binlog to slave; waiting for binlog to be updated | NULL                                                                                                 |    0.000 |
+| 257 | cacti | localhost          | cacti | Query       |   57 | Waiting for global read lock                                          | REPLACE INTO settings  (name, value)  VALUES ('poller_lastrun_1', '1503480541')                      |    0.000 |
++-----+-------+--------------------+-------+-------------+------+-----------------------------------------------------------------------+------------------------------------------------------------------------------------------------------+----------+
+
+MariaDB [(none)]> UNLOCK TABLES;
+Query OK, 0 rows affected (0.01 sec)
+
+[slave]
+MariaDB [(none)]> SHOW PROCESSLIST;
++----+-------------+-----------+------+---------+------+-----------------------------------------------------------------------------+------------------+----------+
+| Id | User        | Host      | db   | Command | Time | State                                                                       | Info             | Progress |
++----+-------------+-----------+------+---------+------+-----------------------------------------------------------------------------+------------------+----------+
+|  3 | root        | localhost | NULL | Query   |    0 | NULL                                                                        | SHOW PROCESSLIST |    0.000 |
+|  6 | system user |           | NULL | Connect |  149 | Waiting for master to send event                                            | NULL             |    0.000 |
+|  7 | system user |           | NULL | Connect |   12 | Slave has read all relay log; waiting for the slave I/O thread to update it | NULL             |    0.000 |
++----+-------------+-----------+------+---------+------+-----------------------------------------------------------------------------+------------------+----------+
+
+
+
+
+------------------------------二、『『附录』』------------------------------
+
+附：[如何不停机备份]https://zhidao.baidu.com/question/517209511.html
+
+附:[FTWRL]http://www.cnblogs.com/conanwang/p/6925108.html https://dev.mysql.com/doc/mysql-backup-excerpt/5.6/en/replication-solutions-backups-read-only.html
+
+
+附：[mysqldump参数详解]
+http://blog.csdn.net/jerry____wang/article/details/53886226
+https://dev.mysql.com/doc/refman/5.7/en/mysqldump.html
+http://blog.csdn.net/weiliu1463/article/details/25305371
+mysqldump  -utencentroot -S /tmp/mysql_20120.sock --default-character-set=utf8 --master-data=2 --single-transaction  --no-data --skip-add-drop-database -R -E --all-databases > all.sql 
+--default-character-set=utf8	指定默认字符集
+--master-data=2  				将二进制日志文件名称和位置写入记录（生成CHANGE MASTER 命令但不生效）
+--single-transaction 			使用事务，而不是lock-tables
+--no-data						不要备份表内容
+-R --routine					备份存储过程以及自定义函数
+-E --events						备份事件
+
+
+附：[事务隔离级别]http://www.cnblogs.com/zhoujinyi/p/3437475.html
+===========================================================================================
+       隔离级别               脏读（Dirty Read）          不可重复读（NonRepeatable Read）     幻读（Phantom Read） 
+===========================================================================================
+
+未提交读（Read uncommitted）        可能                            可能                       可能
+
+已提交读（Read committed）          不可能                          可能                        可能
+
+可重复读（Repeatable read）         不可能                          不可能                     可能
+
+序列化（Serializable）           	不可能                          不可能                     不可能
+
+===========================================================================================
+
+
