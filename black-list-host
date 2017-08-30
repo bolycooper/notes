@@ -1,0 +1,27 @@
+#Hosts-PC
+#Lst-update:2017-08-31 00:13:19
+
+#LocalHost start
+23.53.73.232		store.steampowered.com
+23.53.73.232		steamcommunity.com
+127.0.0.1	localhost
+::1	localhost ip6-localhost ip6-loopback
+127.0.1.1 hostname(linux)
+#LocalHost end
+
+#Blacklist start
+127.0.0.1 www.hao123.com
+127.0.0.1 pic.hao123.com
+127.0.0.1 www.haowj.com.cn
+127.0.0.1 m.haowj.com.cn
+127.0.0.1 conf.wifi.360.cn
+127.0.0.1 qurl.f.360.cn 
+127.0.0.1 pub.zhiong.net
+127.0.0.1 www.qqyewu.com
+127.0.0.1 www.china.com
+127.0.0.1 news.china.com
+127.0.0.1 ent.china.com
+127.0.0.1 military.china.com
+127.0.0.1 club.china.com
+127.0.0.1 pub.zhiong.net
+#Blacklist end
