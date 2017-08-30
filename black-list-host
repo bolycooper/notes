@@ -12,6 +12,7 @@
 #Blacklist start
 127.0.0.1 www.hao123.com
 127.0.0.1 pic.hao123.com
+127.0.0.1 m.hao123.com
 127.0.0.1 www.haowj.com.cn
 127.0.0.1 m.haowj.com.cn
 127.0.0.1 conf.wifi.360.cn
