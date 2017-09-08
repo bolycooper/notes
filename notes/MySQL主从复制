@@ -294,7 +294,7 @@ MariaDB [(none)]> SHOW PROCESSLIST;
 http://blog.csdn.net/jerry____wang/article/details/53886226
 https://dev.mysql.com/doc/refman/5.7/en/mysqldump.html
 http://blog.csdn.net/weiliu1463/article/details/25305371
-mysqldump  -utencentroot -S /tmp/mysql_20120.sock --default-character-set=utf8 --master-data=2 --single-transaction  --no-data --skip-add-drop-database -R -E --all-databases > all.sql 
+mysqldump  -uroot -S /tmp/mysql_20120.sock --default-character-set=utf8 --master-data=2 --single-transaction  --no-data --skip-add-drop-database -R -E --all-databases > all.sql 
 --default-character-set=utf8	指定默认字符集
 --master-data=2  				将二进制日志文件名称和位置写入记录（生成CHANGE MASTER 命令但不生效）
 --single-transaction 			使用事务，而不是lock-tables
